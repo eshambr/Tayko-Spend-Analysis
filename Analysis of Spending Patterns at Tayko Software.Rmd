@@ -1,0 +1,200 @@
+---
+title: "Analysis of Spending Patterns at Tayko Software"
+author: "Esham Bin Rashid"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: lumen
+    toc: true
+    toc_float: true
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::knit_hooks$set(append_name = function(before, options) {
+  if (before) {
+    return("")
+  } else {
+    return(paste("<div style='text-align: left; font-style: italic;'>- Esham Bin Rashid</div>", sep="\n"))
+  }
+})
+opts_chunk$set(append_name = TRUE,echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Introduction
+
+This report provides an in-depth analysis of customer spending behavior based on data from Tayko Software. It aims to predict the spending amount that a purchasing customer will yield considering certain variables.
+
+# Data Loading and Preprocessing
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(neuralnet)
+```
+
+```{r}
+# Loading the Data
+TaykoSoftware_EBR <- read.csv("Tayko.csv")
+
+# Selecting the necessary columns
+TaykoSoftware_EBR <- TaykoSoftware_EBR %>%
+  select(US, Freq, last_update_days_ago, Web.order, Gender.male, Address_is_res, Spending)
+
+# Changing the column names
+TaykoSoftware_EBR <- TaykoSoftware_EBR %>%
+  rename(
+    ADDRESS_US = US,
+    FREQ = Freq,
+    LAST_UPDATE = last_update_days_ago,
+    WEB = Web.order,
+    GENDER = Gender.male,
+    ADDRESS_RES = Address_is_res,
+    SPENDING = Spending
+  )
+```
+
+# Categorical Variables Analysis
+
+```{r}
+# Melting the TaykoSoftware_EBR for the categorical variables
+TaykoSoftware_EBR_melted <- TaykoSoftware_EBR %>%
+  select(WEB, GENDER, ADDRESS_RES, ADDRESS_US, SPENDING) %>%
+  pivot_longer(cols = -SPENDING, names_to = "Variable", values_to = "Category")
+
+# Summary for categorical variables
+category_summary <- TaykoSoftware_EBR_melted %>%
+  group_by(Variable, Category) %>%
+  summarise(
+    Mean_Spending = mean(SPENDING, na.rm = TRUE),
+    SD_Spending = sd(SPENDING, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Visualizing the findings
+ggplot(category_summary, aes(x = Variable, y = Mean_Spending, fill = as.factor(Category))) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.7) +
+  scale_fill_brewer(palette = "Paired", name = "Category") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(size = 12),
+    legend.title = element_text(face = "bold"),
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    x = "Variable",
+    y = "Average Spending",
+    title = "Average Spending by Categorical Variables"
+  )
+```
+
+# Continuous Predictors Analysis
+
+```{r}
+# Scatter plot for Spending vs FREQ
+ggplot(TaykoSoftware_EBR, aes(x = FREQ, y = SPENDING)) +
+  geom_point(alpha = 0.6, color = "#1f77b4", size = 3) +
+  geom_smooth(method = lm, se = FALSE, color = "#ff7f0e") +
+  labs(
+    title = "Spending vs. Frequency of Purchases",
+    x = "Frequency of Purchases",
+    y = "Spending"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(size = 12)
+  )
+
+# Scatter plot for Spending vs LAST_UPDATE
+ggplot(TaykoSoftware_EBR, aes(x = LAST_UPDATE, y = SPENDING)) +
+  geom_point(alpha = 0.6, color = "#1f77b4", size = 3) +
+  geom_smooth(method = lm, se = FALSE, color = "#ff7f0e") +
+  labs(
+    title = "Spending vs. Last Update",
+    x = "Days Since Last Update",
+    y = "Spending"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(size = 12)
+  )
+```
+
+Looking into the plots I can see that there is a linear relationship between Spending and Frequency of Purchase.
+
+# Linear Model Development
+
+```{r}
+# Fit model
+set.seed(2024)
+train_index <- createDataPartition(TaykoSoftware_EBR$SPENDING, p = .75, list = FALSE)
+train_TaykoSoftware_EBR <- TaykoSoftware_EBR[train_index, ]
+test_TaykoSoftware_EBR <- TaykoSoftware_EBR[-train_index, ]
+
+linear_model <- lm(SPENDING ~ ., data = train_TaykoSoftware_EBR)
+summary(linear_model)
+
+# Predicting and evaluating the model
+predictions <- predict(linear_model, newdata = test_TaykoSoftware_EBR)
+RMSE <- sqrt(mean((test_TaykoSoftware_EBR$SPENDING - predictions)^2))
+RMSE
+
+```
+
+# Neural Network Model
+
+```{r}
+# Normalize TaykoSoftware_EBR
+preproc <- preProcess(train_TaykoSoftware_EBR, method = c("center", "scale"))
+train_TaykoSoftware_EBR_norm <- predict(preproc, train_TaykoSoftware_EBR)
+test_TaykoSoftware_EBR_norm <- predict(preproc, test_TaykoSoftware_EBR)
+
+train_TaykoSoftware_EBR_norm$SPENDING <- train_TaykoSoftware_EBR$SPENDING
+test_TaykoSoftware_EBR_norm$SPENDING <- test_TaykoSoftware_EBR$SPENDING
+
+# Fit model
+set.seed(2024)
+nn_model <- neuralnet(SPENDING ~ ., data = train_TaykoSoftware_EBR_norm, hidden = 2,rep=150,linear.output = FALSE)
+summary(nn_model)
+
+# Plotting the network
+plot(nn_model, rep="best")
+
+# Predicting and evaluating the model
+predictions_nn <- predict(nn_model, newdata = test_TaykoSoftware_EBR_norm)
+RMSE_nn <- sqrt(mean((test_TaykoSoftware_EBR$SPENDING - predictions_nn)^2))
+RMSE_nn
+```
+
+# Model Evaluation
+
+```{r}
+# Linear Model Evaluation
+linear_performance <- postResample(predictions, test_TaykoSoftware_EBR$SPENDING)
+
+# Neural Network Model Evaluation
+nn_performance <- postResample(predictions_nn, test_TaykoSoftware_EBR$SPENDING)
+
+linear_performance
+nn_performance
+
+```
+RMSE: Linear Model has a RMSE of 146.566, which is significantly lower than NN Model's RMSE of 245.380. This means that Linear Model's predictions are closer to the actual data points compared to NN Model.
+
+R-squared: Linear Model has an R-squared of 0.555899, much higher than NN Model's R-squared of 0.078026. This indicates that Linear Model explains about 55.59% of the variance in the dependent variable based on its predictors, while NN Model only explains about 7.80%. Therefore, Linear Model has a better fit.
+
+MAE: Linear Model also leads with a lower MAE of 85.310 compared to NN Model's MAE of 113.920, showing that the average error per prediction is smaller.
+
+
+Report Made By -
+Esham Bin Rashid,
+Student ID: 00864931,
+Graduate Student,
+MS in Business Analytics,
+University of New Haven
